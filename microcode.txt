@@ -1,0 +1,139 @@
+; c0  - reset PC
+; c1  - AR load
+; c2  - DR load
+; c3  - IR load and PC increment
+; c4  - AC load
+; c5  - X,Y load
+; c6  - choose AR input (0 - PC, 1 - DR[address])
+; c7  - choose X/Y input (0 - AC, 1 - DR)
+; c8  - memory write
+; c9  - PC load
+; c10 - update ALU flags (no register writeback)
+; c11 - SP decrement (SP <- SP - 1)
+; c12 - choose AR input (Select Stack Pointer)
+; c13 - SP increment (SP <- SP + 1)
+; c14 - select PC as memory write data source
+; c24 - means an illegal instruction couldn't execute
+
+"RESET"
+    activate c0                 ; PC <- 0
+"FETCH"
+    activate c1                 ; AR <- PC
+    activate c2                 ; DR <- Mem[AR]
+    activate c3                 ; IR <- DR[opcode], PC <- PC+1
+
+"DECODE"
+    if DECODE                   ;Sets CS to 1000 in order to load UPC with address from opcode_mapper.hex
+
+"ALU_OPERATION"
+   activate c4                  ; AC <- ALU_output
+   activate c5                  ; X or Y <- AC
+   goto "FETCH"
+
+
+"LOAD_OPERATION"
+    activate state26            ; AR <- DR[address]
+    activate c2                 ; DR <- Mem[AR]
+    activate state28		; X or Y <- DR
+    goto "FETCH" 
+
+
+"STORE_OPERATION"
+    activate state26 		 ; AR <- DR[address]
+    activate c8			 ; Mem[AR] <- X, Y
+    goto "FETCH"
+	
+
+"BRANCH_ALWAYS" 
+    activate state26		        ;AR <- DR[address] 
+    activate c9		            ;PC <- AR	
+    goto "FETCH"
+
+"ILLEGAL_INSTRUCTION"
+    goto "ILLEGAL_INSTRUCTION" activate c24
+
+"BRANCH_IF_ZERO"
+    goto "BRANCH_ALWAYS" if zero_flag
+    goto "FETCH"
+
+"BRANCH_IF_NEGATIVE"
+    goto "BRANCH_ALWAYS" if negative_flag
+    goto "FETCH"
+
+"BRANCH_IF_CARRY"
+    goto "BRANCH_ALWAYS" if carry_flag
+    goto "FETCH"
+
+"BRANCH_IF_OVERFLOW"
+    goto "BRANCH_ALWAYS" if overflow_flag
+    goto "FETCH"
+
+"TST" ; doesn't update Accumulator, generates only flags
+   goto "FETCH" activate c10
+
+"JMP_CALL"
+   activate c11;		SP <- SP - 1
+   activate state27;		AR <- SP (makes control field value 26)
+   activate state29;		Mem[AR] <- PC
+   activate state26;		AR <- DR[address]
+   activate c9;			PC <- AR (jump to subroutine)
+   goto "FETCH"
+
+"RET"                           ; Return from Procedure
+    activate state27       	; Step 1: AR <- SP
+    activate c2                 ; Step 2: DR <- Mem[AR] (Pop saved PC)
+    activate c13                ; Step 3: SP <- SP + 1 (Clean stack)
+    activate state26       	;Step 4: AR <- DR (Place popped value in AR)
+    activate c9                 ; Step 5: PC <- AR (Restore PC)
+    goto "FETCH"
+     
+
+"PUSH"
+    activate c11;           SP <- SP - 1
+    activate state27;        AR <- SP
+    activate c8;            Mem[AR] <- X/Y
+    goto "FETCH"
+
+"POP"
+    activate state27             ; Step 1: AR <- SP (Point to top of stack)
+    activate c2                  ; Step 2: DR <- Mem[AR] (Read the data)
+    activate state28              ; Step 3: X/Y <- DR (Load data into register)
+    activate c13                 ; Step 4: SP <- SP + 1 (Clean up stack)
+    goto "FETCH"
+
+"BOOTH_RADIX2"
+    activate c15 ; A:=0, COUNTER:=0, Q[-1] := 0, M := X/Y, Q := sign_extend_unit_out[15:0]
+
+"BR2_TEST"
+    goto "BR2_ADD" if BOOTH01
+    goto "BR2_SUB" if BOOTH10
+"BR2_SHIFT"
+    goto "TEST_COUNTER" activate c18
+
+"BR2_ADD"
+    goto "BR2_SHIFT" activate c16
+"BR2_SUB"
+    goto "BR2_SHIFT" activate c17 
+
+"TEST_COUNTER"
+    goto "BR2_END" if count15
+    goto "BR2_TEST" activate c19; counter increment
+"BR2_END"
+    activate c20; X/Y <- Q[15:0]
+    goto "FETCH"
+
+;"RESTORING_DIVISION"
+;	activate c15; counter <- 16, M <- X/Y, A<-0, Q<- sign_extend_unit_out[15:0]
+;"DIVISION_SHIFT"
+;	activate c16;			 AQ <- AQ <- 1 A <- A-M
+;"DIVISION_TEST"
+;	goto "DIV_RESTORE" if SIGN1
+;	activate c17; Q[0] <- 1
+;	goto "DECREMENT"
+;"DIV_RESTORE"
+;	activate c21; 
+;"DECREMENT"
+;	activate c22;
+;	goto "DIVISION_SHIFT" if counternot0
+;	activate c23;	
+;	goto "FETCH"
